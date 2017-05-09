@@ -6,7 +6,9 @@
   found in the file "license.txt" at the root of this distribution.
 ---------------------------------------------------------------------------*/
 
-/* Read user input from the console.
+/* Read user input from the console. 
+
+   test `std/async` and `module std/time/instant`.
 */
 module std/os/readline
 
@@ -17,22 +19,27 @@ external include {
 }
 
 // Displays `query` to the user (with a space attached) and issues a `readline` for the user response.
-public fun question( query : string ) : <async,console> string {
+public fun question( query : string ) : <async,exn,console> string {
   print(query + " ")
   readline()
 }
 
 // Read a line of input from the user.
-public fun readline() : <async,console> string {
-  unsafe-async-yield( prim-readline )
+public fun readline() : <async,exn,console> string {
+  on-cancel( {
+    trace("cancel readline")
+    prim-cancel-readline()
+  }, { 
+    await-exn1( fun(resume) { 
+      prim-readline(resume) 
+    }) 
+  })
 }
 
-private extern prim-readline( cb : (string) -> <console|e> () ) : console () {
+extern prim-readline( cb : (null<exception>,string) -> io () ) : io () {
   js "_readline"
 }
 
-
-// Read a line of input from the user.
-extern xreadline() : <async,console> string {
-  js inline "(function(){ _readline( $std_core._async_callback1(_k) ); return $std_core.async_yield(); })()"
+extern prim-cancel-readline() : exn () {
+  js "_cancel_readline"
 }

@@ -23,7 +23,7 @@ module Common.NamePrim
           , nameCopy
           , nameAssign, nameRefSet, nameAssigned
           , nameByref, nameDeref, nameIndex
-          , nameDecreasing, nameSubStr1
+          , nameDecreasing, nameSubStr1, nameDec
 
           , nameUnit
           , nameReturn, nameTrace, nameLog
@@ -139,9 +139,10 @@ nameTpOptional       = preludeName "optional"
 
 nameTpDelay          = preludeName "delay"
 
-namePatternMatchError = preludeName "error-pattern-match"
+namePatternMatchError = preludeName "error-pattern"
 nameMainConsole      = preludeName "main-console"
 nameSubStr1          = preludeName "substr1"
+nameDec              = preludeName "dec"
 
 nameAssign      = preludeName ":="
 nameAssigned    = newName "assigned"
@@ -184,7 +185,7 @@ nameInCps       = preludeName "incps"
 nameTpYld       = preludeName "yld"
 nameTpCont      = preludeName "cont"
 nameEnsureK     = preludeName "ensureK"
-nameTpAsync     = preludeName "async"
+nameTpAsync     = qualify (newName "std/async") (newName "async")
 
 nameYieldOp     = preludeName ".yieldop"
 nameYieldOp1    = preludeName ".yieldop1"

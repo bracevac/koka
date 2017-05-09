@@ -12,7 +12,7 @@
 */
 module std/time/duration
 
-import std/num/fixed
+import std/num/ddouble
 import std/time/timestamp
 
 /*----------------------------------------------------------------------------
@@ -20,13 +20,13 @@ import std/time/timestamp
 ----------------------------------------------------------------------------*/
 
 // A duration in time in SI seconds (as measured on the Earth's geoid).\
-// A duration can be arbitrarly long and is precise up to 10^-15^s (1 femto-second).
+// A duration is represented by a `:ddouble` giving it a high range and precision (see the [`instant`](std_time_instant.html) module)
 abstract struct duration(
   secs : timespan                     
 )
 
 // A zero duration.
-public val duration0 : duration = Duration(zero)
+public val zero : duration = Duration(zero:timespan)
 
 // Convert a `:timespan` to a `:duration`. Be careful to only use
 // use this on timespan's that are in SI time units!
@@ -56,12 +56,12 @@ public fun timestamp( d : duration ) : timestamp {
 
 // Create a duration from whole seconds `secs` and a fraction of seconds `frac`.
 public fun duration( secs : int, frac : double = 0.0 ) : duration {
-  Duration(fixed(secs,frac))
+  Duration(timespan(secs,frac))
 }
 
 // Create a duration from seconds as a `:double`.
 public fun duration( secs : double ) : duration {
-  Duration(fixed(secs))
+  Duration(timespan(secs))
 }
 
 // Return the duration in SI seconds.
@@ -71,23 +71,23 @@ public fun seconds( d : duration ) : timespan {
 
 // Return the duration in rounded SI milli-seconds.
 public fun milli-seconds( d : duration ) : int {
-  (d.secs * 1000.fixed).round
+  (d.secs * 1000.timespan).int
 }
 
 // Return the duration in rounded SI nano-seconds.
 public fun nano-seconds( d : duration ) : int {
-  (d.secs * 1000000000.fixed).round
+  (d.secs * 1000000000.timespan).int
 }
 
 // The whole seconds (in some time unit) of the duration as `:int``.
 public fun trunc( d : duration ) : int {
-  d.secs.trunc
+  d.secs.trunc.int
 }
 
 // The fractional seconds of a duration as a `:double`.
 // `d.seconds == d.trunc.fixed + d.fraction.fixed
 public fun fraction( d : duration ) : double {
-  d.secs.fraction
+  d.secs.fraction.double
 }
 
 // Is this a negative duration?
@@ -144,8 +144,11 @@ public fun (-)( d : duration, e : duration ) : duration {
 
 // Show a duration in SI seconds.
 public fun show( d : duration, max-prec : int = 9 ) : string {
-  d.secs.show(max-prec=max-prec) + "s"
+  d.secs.show-fixed(max-prec,True) + "s"
 }
+
+// Create a `:duration` of `n` milli-seconds.
+public fun milli-seconds( n : int ) : duration { duration(n.timespan / 1000.timespan) }
 
 // Create a `:duration` of `n` seconds.
 public fun seconds( n : int ) : duration { duration(n) }

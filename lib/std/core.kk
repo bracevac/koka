@@ -15,7 +15,7 @@ public module std/core
 
 infixr 80  (^)
 infixl 70  (*), (%), (/), cdiv, cmod
-infixr 60  (+), (-)
+infixl 60  (+), (-)
 infix  40  (!=), (==), (<=), (>=), (<), (>) 
 infixr 30  (&&)
 infixr 20  (||)
@@ -48,15 +48,15 @@ extern include {
 // Core types
 // ----------------------------------------------------------------------------
 
-// A 32-bit signed integer (using two's complement to represent negative numbers).
+// An arbitrary precision signed integer.
 type int
 
-// A unicode string is a sequence of unicode characters (`char`).
-// The encoding of a string is internal and not exposed and there
-// is no direct indexing of characters in string. 
+// A string is a sequence of unicode character points (`char`).
+// The encoding of a string is internal and there
+// is no constant-time indexing of characters in a string. 
 // Use the `:sslice` type for efficient matching and retrieving
 // sub-strings from string.\
-// See also the [``std/string``](std_string.html) module.
+// See also the [``std/text/string``](std_text_string.html) module.
 type string
 
 // A 64-bit IEEE 754 floating point value
@@ -69,7 +69,7 @@ type any
 // Characters are unicode _codepoint_\/s.
 // This is different from a unicode _grapheme_ which represents a single displayed
 // symbol and can consists of multiple codepoints due to combining characters and marks.
-// (see also the [``std/unicode``](std_unicode.html) module.)
+// (see also the [``std/text/unicode``](std_text_unicode.html) module.)
 type char
 
 
@@ -157,17 +157,63 @@ extern inline inject-st : forall<a,h,e> (() -> e a) -> total (() -> <st<h>|e> a)
 // Exceptions
 type exception
 
-// Return a system dependent description of an exception
-extern show( exn : exception ) : string {
-  cs inline "#1.ToString()"
-  js inline "(#1 ? #1.toString() : 'unknown exception')"
+type open exception-info {
+  Error
+  Assert
+  Todo
+  Range
+  Pattern( location : string, definition : string )
+  System( errno : string )   
+  Internal( name : string )  
 }
 
-// Catch an exception raised by `error` and handle it.
-// Use `on-exn` or `on-fail` when appropiate.
-extern catch : forall<e,a> ( action : () -> <exn|e> a, hndl: exception -> e a) -> e a {
-  cs inline "Primitive.Catch<##2>(#1,#2)" // todo: handle cps
-  js inline "_primcatch(action,hndl, (typeof _k === 'undefined' ? undefined : _k))"
+extern info( exn : exception ) : exception-info {
+  cs "Primitive.ExnInfo"
+  js "exn_info"
+}
+
+extern stack-trace( exn : exception ) : string {
+  cs "Primitive.ExnStackTrace"
+  js "exn_stacktrace"
+}
+
+extern exception( message : string, info : exception-info ) : exception {
+  cs "Primitive.ExnException"
+  js "exn_exception"
+}
+
+extern throw( exn : exception ) : exn a {
+  cs "Primitive.Throw"
+  js "exn_throw"
+}
+
+// Return the message associated with an exception
+extern message( exn : exception ) : string {
+  cs "Primitive.ExnMessage"
+  js "exn_message"
+}
+
+// Show the exception message and its stack trace.
+fun show( exn : exception ) : string {
+  exn.stack-trace
+}
+
+// Raise an exception with a specified message.
+fun error( message : string ) : exn a { 
+  throw(message,Error)
+}
+
+// Throw an exception
+fun throw( message : string, err : exception-info = Error) : exn a {
+  throw( exception(message,err) )
+}
+
+// Raise a pattern match exception. This is function is used internally by the
+// compiler to generate error messages on pattern match failures.
+extern error-pattern(location : string, definition : string) : exn a { 
+  // needs to be extern since the compiler generates calls and dependency resolution does not work on it
+  cs "Primitive.ExnErrorPattern"
+  js "exn_error_pattern"  
 }
   
 // Execute a `hndler` no matter what exception was raised in `action`.
@@ -177,39 +223,24 @@ extern finally : forall<e,a> (action: () -> e a, hndl: () -> e ()) -> e a  {
   js inline "_primfinally(action,hndl, (typeof _k === 'undefined' ? undefined : _k))"
 }
 
-// Raise an exception with a specified message.
-extern error : forall<a> string -> exn a { 
-    cs "Primitive.Error";
-    js "_error"
+
+// Catch an exception raised by `error` and handle it.
+// Use `on-exn` or `on-fail` when appropiate.
+extern catch : forall<e,a> ( action : () -> <exn|e> a, hndl: exception -> e a) -> e a {
+  cs inline "Primitive.Catch<##2>(#1,#2)" // todo: handle cps
+  js inline "_primcatch(#1, #2, (typeof _k === 'undefined' ? undefined : _k))"
 }
 
-// Throw an exception
-extern throw : forall<a> exception -> exn a {
-  cs inline "Primitive.Throw<##1>(#1)"
-  js "error(#1)"
-}
-
-// Raise a pattern match exception. This is function is used internally by the
-// compiler to generate error messages on pattern match failures.
-extern error-pattern-match : forall<a> (range : string, def : string) -> exn a { 
-    cs "Primitive.PatternMatchError"
-    js "_error_pattern_match"
-}
 
 // Set a `hndler` that is called when an exception is raised in the `action` block.
-fun on-fail( hndler : () -> <exn|e> (), action : () -> <exn|e> a ) : <exn|e> a
+fun on-exn( hndler : exception -> <exn|e> (), action : () -> <exn|e> a ) : <exn|e> a
 {
-  catch-on-fail( action, fun(exn){ hndler(); throw(exn) })
+  catch-on-exn( action, fun(exn){ hndler(exn); throw(exn) })
 }
 
-// Return a default value when an exception is raised
-fun on-exn( value : a , action : () -> <exn|e> a ) : e a {
-  catch( action, fun(_) { value })
-}
-
-private extern catch-on-fail : forall<e,a> ( action : () -> e a, hndler: exception -> e a) -> e a {
-  cs inline "Primitive.Catch<##2>(#1,#2)"
-  js "_catch"
+private extern catch-on-exn : forall<e,a> ( action : () -> e a, hndler: exception -> e a) -> e a {
+  cs inline "Primitive.Catch<##2>(#1,#2)" // todo: handle cps
+  js inline "_primcatch(#1, #2, (typeof _k === 'undefined' ? undefined : _k))"
 }
 
 
@@ -227,9 +258,22 @@ fun on-success( hndler : () -> e (), action : () -> e a ) : e a
   return x
 }
 
-// Transform an Exception to an `:either` type.
+// Transform an exception effect to an `:either` type.
 fun try( action : () -> <exn|e> a ) : e either<exception,a> {
   catch({ Right(action()) },Left)
+}
+
+// Return a default value when an exception is raised
+fun try( value : a , action : () -> <exn|e> a ) : e a {
+  catch( action, fun(_) { value })
+}
+
+// Transform an `:either` type back to an `exn` effect by throwing on `Left`.
+fun untry( ex : either<exception,a> ) : exn a {
+  match(ex) {
+    Left(exn) -> throw(exn)
+    Right(x)  -> x
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -243,6 +287,27 @@ type optional<a> {
   con Optional(value:a)
   // `None` is used when an optional argument is not provided.
   con None
+}
+
+
+// ----------------------------------------------------------------------------
+// Null is used for external interfaces 
+// ----------------------------------------------------------------------------
+
+// Abstract type used for passing `null` values to external functions
+type null<a> 
+
+// Transform a `:maybe` type to a `:null` type (using `null` for `Nothing`).
+external null(x : maybe<a>) : null<a> {
+  cs inline "(#1==null ? null : #1.value)"
+  js inline "(#1==null ? null : #1.value)"
+}
+
+// Transform a `:null` type to a `:maybe` type. Note that it is not
+// always the case the `id(x) == maybe(null(x))` (e.g. when `x = Just(Nothing)`).
+external maybe( n : null<a> ) : maybe<a> {
+  cs inline "(#1==null ? $std_core.Nothing : $std_core.Just(#1))"
+  js inline "(#1==null ? $std_core.Nothing : $std_core.Just(#1))"
 }
 
 
@@ -544,7 +609,7 @@ fun list( lo : int, hi: int, f : int -> e a) : e list<a> {
 
 
 // Create a list of characters from `lo`  to `hi`  (inclusive).
-function list( lo : char, hi : char ) : total list<char>
+fun list( lo : char, hi : char ) : total list<char>
 {
   list(lo.int, hi.int).map( char )
 }
@@ -767,10 +832,10 @@ fun foldr1(xs : list<a>, f : (a,a) -> <exn|e> a) : <exn|e> a
 fun replicate( x : a, n : int ) : list<a>
 {
   fun enumerate( i : int, acc : list<_a> ) {
-    if (i <= 0) then acc else enumerate(i - 1,Cons(x,acc))
+    if (i <= 0) then acc else enumerate(unsafe-decreasing(i.dec),Cons(x,acc))
   }
 
-  unsafe-nodiv{ enumerate(n,[]) }
+  enumerate(n,[])
 }
 
 // split a list at position `n` 
@@ -1343,7 +1408,12 @@ extern cdiv-pow10( i : int, n : int ) : int {
   js "_int_cdiv_pow10"
 }
 
-
+fun divmod-pow10( i : int, n : int ) : (int,int) {
+  if (n <= 0) return (i,0)
+  val cq = i.cdiv-pow10(n)
+  val cr = i - cq.mul-pow10(n)
+  if (!cr.neg?) then (cq,cr) else (cq.dec, cr + pow10(n))
+}
 
 // Is this an even integer?
 fun even?(i:int) : bool { !odd?(i) }
@@ -1397,7 +1467,7 @@ fun sum( xs : list<int> ) : int
 
 // Type of a 32-bit signed integer. 
 // See the [``std/int32``](std_int32.html) module for operations on 32-bit integers.
-private type int32
+type int32
 
 // Convert an `:int32` to an `:int`.
 private extern inline int( i : int32 ) : int { 
@@ -1415,16 +1485,17 @@ private extern inline int32  : (int) -> int32   {
 
 // Minimal set of operations that we need in `std/core`.
 private extern inline (<=) : (int32,int32) -> bool  { inline "(#1 <= #2)"; js inline "(#1 <= #2)" }
+private extern inline (<)  : (int32,int32) -> bool  { inline "(#1 < #2)"; js inline "(#1 < #2)" }
 private extern inline (+)  : (int32,int32) -> int32 { inline "(#1 + #2)"; js inline "((#1 + #2)|0)" }
 private extern inline (-)  : (int32,int32) -> int32 { inline "(#1 - #2)"; js inline "((#1 - #2)|0)" }
 private extern inline pos?( i : int32 ) : bool { inline "(#1>0)" }
 private extern inline neg?( i : int32 ) : bool { inline "(#1<0)" }
 
-private fun inc( i : int32 ) : int32 {
+private fun incr( i : int32 ) : int32 {
   i + 1.int32
 }
 
-private fun dec( i : int32 ) : int32 {
+private fun decr( i : int32 ) : int32 {
   i - 1.int32
 }
 
@@ -1577,10 +1648,10 @@ extern inline int(d : double ) : int {
 val nan : double = getNan()
 
 // Positive infinity
-val pos-inf : double = getPosInf()
+val posinf : double = getPosInf()
 
 // Negative infinity
-val neg-inf : double = getNegInf()
+val neginf : double = getNegInf()
 
 // The maximal double value
 val max-double : double = getMaxDouble()
@@ -1614,6 +1685,11 @@ extern inline posinf? : (double) -> bool {
 extern inline neginf? : (double) -> bool {
   cs "double.IsNegativeInfinity"
   js inline "((#1) === Number.NEGATIVE_INFINITY)"
+}
+
+// Is this a finite number (i.e. not `nan` or infinity)
+extern inline finite?( d : double ) : bool {
+  js "isFinite"
 }
 
 
@@ -1654,12 +1730,12 @@ extern inline ceiling : (d:double) -> double {
 // If `d < 0.0` , return the smallest integer equal or larger to `d` .
 extern trunc : (d:double) -> double {
   cs "Math.Truncate"
-  js "Mathtrunc"
+  js "_double_trunc"
 }
 
 // Return the fractional part of a `:double` `d`.\
 // `d.trunc + d.fraction === d`\
-// `(~2.4).fraction === ~0.4`
+// `(-2.4).fraction === -0.4`
 fun fraction(d : double) : double {
   d - d.trunc
 }
@@ -1696,6 +1772,16 @@ fun pow2( p : double ) : double {
   pow(2.0,p)
 }
 
+// Return _e_ to the power of `p`.
+extern inline exp( p : double ) : double {
+  js "Math.exp"
+}
+
+// Return the logarithm in base _e_.
+extern inline ln( d : double ) : double {
+  js "Math.log"
+}
+
 // Round a double to a specified precision
 fun round-to-prec( d : double, prec : int  ) : double {
   if (prec <= 0) then d.round else {
@@ -1714,9 +1800,9 @@ extern inline cos( d : double ) : double {
 
 // Round a double to its nearest integral value.
 // If the value is halfway between two integers, the value is rounded to the even one.
-extern inline round : (d:double) -> double {
+extern round : (d:double) -> double {
   cs "Math.Round"
-  js "Math.round"
+  js "_double_round"
 }
 
 // Return the sum of a list of doubles
@@ -1910,7 +1996,7 @@ fun tail( s : string ) : string {
 }
 
 // Return the common prefix of two strings (upto `upto` characters (default is minimum length of the two strings))
-extern common-prefix(s : string, t : string, upto : int = ~1 ) : sslice {
+extern common-prefix(s : string, t : string, upto : int = -1 ) : sslice {
   cs "Primitive.SliceCommonPrefix"
   js "_sslice_common_prefix"
 }
@@ -1926,7 +2012,7 @@ extern common-prefix(s : string, t : string, upto : int = ~1 ) : sslice {
 //
 // * `"abc".first.advance(1).string == "b"`,
 // * `"abc".first.advance(3).string == ""`,
-// * `"abc".last.advance(~1).string == "b"`.
+// * `"abc".last.advance(-1).string == "b"`.
 // 
 public extern advance( slice : sslice, count : int ) : sslice {
   cs "Primitive.SliceAdvance"
@@ -1938,7 +2024,7 @@ public extern advance( slice : sslice, count : int ) : sslice {
 // For example:
 //
 // * `"abc".first.extend(1).string == "ab"`
-// * `"abc".last.extend(~1).string == ""`
+// * `"abc".last.extend(-1).string == ""`
 // 
 extern extend( slice : sslice, count : int ) : sslice {
   cs "Primitive.SliceExtend"
@@ -2070,18 +2156,20 @@ fun truncate( s : string, count : int ) : string  {
   s.first.extend(count - 1).string
 }
 
-// Trim off a substring `sub` if `s` starts with that string.
+// Trim off a substring `sub` while `s` starts with that string.
 fun trim-left( s : string, sub : string ) : string {
+  if (sub.empty?) return s
   match(s.starts-with(sub)) {
-    Just(slice) -> slice.string
+    Just(slice) -> trim-left(unsafe-decreasing(slice.string),sub)
     Nothing -> s
   }
 }
 
-// Trim off a substring `sub` if `s` ends with that string.
+// Trim off a substring `sub` while `s` ends with that string.
 fun trim-right( s : string, sub : string ) : string {
+  if (sub.empty?) return s
   match(s.ends-with(sub)) {
-    Just(slice) -> slice.string
+    Just(slice) -> trim-right(unsafe-decreasing(slice.string),sub)
     Nothing -> s
   }
 }
@@ -2278,7 +2366,13 @@ private extern inline unsafe-vector : forall<a> ( n : int32 ) -> total vector<a>
 // Return the element at position `index`  in vector `v` . Raise an out of bounds exception if `index < 0`  or `index >= v.length` .
 extern inline [] : forall<a> ( v : vector<a>, index : int ) -> exn a  { 
   cs inline "(#1)[Primitive.IntToInt32(#2)]" 
-  js inline "(#1)[$std_core._int_to_int32(#2)]" 
+  js inline "$std_core._vector_at(#1,#2)" 
+}
+
+// Return the element at position `index` in vector `v`, or `Nothing` if out of bounds
+fun at( v  : vector<a>, index : int ) : maybe<a> {
+  val idx = index.int32
+  if (idx < 0.int32 || v.length32 <= idx) then Nothing else Just(unsafe-idx(v,idx))
 }
 
 // Return the length of a vector.
@@ -2324,7 +2418,7 @@ fun foreach-indexed( v : vector<a>, f : (a,int) -> e () ) : e () {
 }
 
 private fun foreach-indexed32( v : vector<a>, f : (a,int32) -> e () ) : e () {
-  for32( 0.int32, v.length32.dec ) fun(i) {
+  for32( 0.int32, v.length32.decr ) fun(i) {
     f(v.unsafe-idx(i),i)
   }
 }
@@ -2332,7 +2426,7 @@ private fun foreach-indexed32( v : vector<a>, f : (a,int32) -> e () ) : e () {
 // Invoke a function `f` for each element in a vector `v`.
 // If `f` returns `Just`, the iteration is stopped early and the result is returned.
 fun foreach-while( v : vector<a>, f : a -> e maybe<b> ) : e maybe<b> {
-  for-while32( 0.int32, v.length32.dec ) fun(i) {
+  for-while32( 0.int32, v.length32.decr ) fun(i) {
     f(v.unsafe-idx(i))
   }
 }
@@ -2439,8 +2533,8 @@ fun show-hex( i : int, width : int = 1, use-capitals : bool = True, pre : string
 private fun show-double( d : double, precision : int, format : string )
 {
   val p = if (precision < 0) then 0 else precision
-  val s = gformat(d,format + show(p))
-  if (s.contains(".") || s.contains("e")) then s else s + ".0"
+  gformat(d,format + show(p))
+  // if (s.contains(".") || s.contains("e")) then s else s + ".0"
 }
 
 // Show a `:double` as a string.
@@ -2488,7 +2582,7 @@ private fun show-char( c : char ) : string
 }
 
 // Show a `:char` as a character literal
-function show( c : char ) : string
+fun show( c : char ) : string
 {
   "'" + c.show-char + "'"
 }
@@ -2620,10 +2714,14 @@ fun println(d : double)  { printsln(show(d)) }
 fun println( b : bool )  { printsln(show(b)) }
 
 // Print a character to the console, including a final newline character.
-function println(c : char)    { printsln(c.string) }
+fun println(c : char)    { printsln(c.string) }
 
 // Print a unit value to the console, including a final newline character
 fun println( u : () )  { printsln(show(())) }
+
+// ----------------------------------------------------------------------------
+// Trace, assert, todo
+// ----------------------------------------------------------------------------
 
 
 private extern xtrace : ( message : string ) -> ()  {
@@ -2647,6 +2745,21 @@ public fun trace( message : string ) : () {
 public fun notrace() : st<global> () {
   trace-enabled := False
 }
+
+
+fun assert( message : string, condition : bool ) : () {
+  if (!condition) unsafe-noexn{ throw(message,Assert) }  
+}
+
+fun todo( message : string ) : () {
+  unsafe-noexn{ throw(message,Todo) }
+}
+
+
+
+// ----------------------------------------------------------------------------
+// Main
+// ----------------------------------------------------------------------------
 
 // Used by the compiler to wrap main console applications
 extern main-console : forall<a,e> ( main : () -> e a ) -> e a {
@@ -2807,11 +2920,11 @@ fun for( start: int, end : int, action : (int) -> e () ) : e ()
 {
   fun rep( i : int ) {
     if (i <= end) {
-      inject-div(action)(i)
-      rep(i.inc)
+      action(i)
+      rep(unsafe-decreasing(i.inc))
     }
   }
-  unsafe-nodiv { rep(start) }
+  rep(start) 
 }
 
 
@@ -2821,11 +2934,11 @@ private fun for32( start: int32, end : int32, action : (int32) -> e () ) : e ()
 {
   fun rep( i : int32 ) {
     if (i <= end) {
-      inject-div(action)(i)
-      rep(i.inc)
+      action(i)
+      rep(unsafe-decreasing(i.incr))
     }
   }
-  unsafe-nodiv { rep(start) }
+  rep(start)
 }
 
 
@@ -2836,14 +2949,14 @@ fun for-while( start: int, end : int, action : (int) -> e maybe<a> ) : e maybe<a
 {
   fun rep( i : int ) {
     if (i <= end) {
-      match(inject-div(action)(i)) {
-        Nothing -> rep(i.inc)
+      match(action(i)) {
+        Nothing -> rep(unsafe-decreasing(i.inc))
         Just(x) -> Just(x)
       }
     }
     else Nothing
   }
-  unsafe-nodiv { rep(start) }
+  rep(start) 
 }
 
 
@@ -2854,14 +2967,14 @@ private fun for-while32( start: int32, end : int32, action : (int32) -> e maybe<
 {
   fun rep( i : int32 ) {
     if (i <= end) {
-      match(inject-div(action)(i)) {
-        Nothing -> rep(i.inc)
+      match(action(i)) {
+        Nothing -> rep(unsafe-decreasing(i.incr))
         Just(x) -> Just(x)
       }
     }
     else Nothing
   }
-  unsafe-nodiv { rep(start) }
+  rep(start) 
 }
 
 // Return the host environment: `dotnet`, `browser`, `webworker`, or `node`. 
@@ -2947,30 +3060,22 @@ private fun hfinally( action, fhandler ) {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Asynchronous operations are supported through the `:async` effect.
-// The basic effect is in core since it usually requires some support from the host system.
-// ----------------------------------------------------------------------------
+type handler-context
 
-// Asynchronous operations have the `:async` effect.
-abstract effect async {
-  async-yield() : ()
+extern capture-handler-context(upto:int32) : ndet handler-context {
+  js "_capture_handler_context"
 }
 
-public fun ".async-handle"(action) {
-  handle(action) {
-    return x -> x
-    async-yield() -> () // todo: do a zero timeout?
-  }
+extern resume-in-handler-context( context : handler-context, resume : a -> <cps|e> b, arg : a ) : <cps|e> b {
+  js inline "_resume_in_handler_context(#1,#2,#3,_k)"
 }
 
-
-extern ".save-handler-context"() : any {
-  js "$saveHandlerContext"
+extern invoke-in-handler-context( context : handler-context, action : a -> io (), arg : a ) : io () {
+  js "_invoke_in_handler_context"
 }
 
-extern ".restore-handler-context"( context : any, action : a -> (), arg : a ) : () {
-  js "$restoreHandlerContext"
+extern current-handler-top() : ndet int32 {
+  js inline "$htop"
 }
 
 
@@ -3015,6 +3120,11 @@ extern ".htop"() : any {
 extern ".hstack"() : any {
   js inline "$hstack"
 }
+
+extern outer-resume( resume : a -> <cps,io> b ) : (a -> io b) {
+  js "_outer_resume"
+}
+
 
 extern ".makeHandler0"( optag:string, // opmatch : operation<c> -> opmatch<e1,e,o>, 
                           ret : a -> <cps|e> b,  

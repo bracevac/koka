@@ -13,7 +13,7 @@
 */
 module std/time/time
 
-import std/num/fixed
+import std/num/ddouble
 import std/time/timestamp
 import std/time/duration
 import std/time/instant
@@ -28,7 +28,7 @@ abstract struct time (
   public  date    : date,
   public  clock   : clock,
   public  calendar: calendar,
-  public  tzdelta : duration = duration0,
+  public  tzdelta : duration = zero,
   public  tzabbrv : string   = "",
   public  timezone: timezone = tz-utc,
   public  instant : instant
@@ -60,7 +60,7 @@ public fun minutes( t : time ) : int {
 }
 
 // Return the fractional seconds of a `:time`. 
-public fun seconds( t : time ) : fixed {
+public fun seconds( t : time ) : timespan {
   t.clock.seconds
 }
 
@@ -95,6 +95,7 @@ public fun round-to-prec( t : time, prec : int ) : time {
   val c    = t.clock
   val secs = c.seconds.round-to-prec(prec)
   val ri   = t.instant.use(t.calendar.timescale).round-to-prec(prec)
+  // trace("time.round-to-prec: " + t.showx + ", t.seconds: " + t.seconds.show + ", secs: " + secs.show)
   if (secs.trunc == t.seconds.trunc) then {
     // whole seconds stay the same, just update with the rounded seconds and instant
     t(clock=c(seconds=secs), instant = ri)
@@ -108,12 +109,21 @@ public fun round-to-prec( t : time, prec : int ) : time {
 // Show a `:time` in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format.
 public fun show(t : time, prec : int = 9 ) : string {
   val tp = t.round-to-prec(prec)
+  tp.showx(prec)
+}
+
+fun showx( tp : time, prec : int = 9 ) : string {
   tp.date.show(tp.calendar.month-prefix)
    + "T" + tp.clock.show(prec)
    + show-tzdelta(tp.tzdelta ) 
-   + (if (tp.tzabbrv.empty?) then "" else " (" + tp.tzabbrv + ")") 
+   + (if (tp.tzabbrv.numeric?) then "" else " (" + tp.tzabbrv + ")") 
    + (if (tp.calendar.name.empty? || tp.calendar.month-prefix.notempty?) then "" else " " + tp.calendar.name)
 }
+
+fun numeric?( abbrv : string ) : bool {
+  (abbrv.empty? || abbrv.head=="+" || abbrv.head=="-")
+}
+
 fun show-date(d : date) : string {
   d.show
 }
@@ -156,8 +166,19 @@ public fun time( t : time, tz : timezone = t.timezone, cal : calendar = t.calend
   time(t.instant,tz,cal)
 }
 
-// Return the `:time` value for a given date and clock in a timezone `tz` (=`tz-utc` by default) 
-// interpreted by calendar `cal` (=`cal-iso`). See `instant` for roll-over behaviour.
+/* Return the `:time` value for a given date and clock in a timezone `tz` (=`tz-utc` by default) 
+interpreted by calendar `cal` (=`cal-iso`). 
+
+The `month`, `day`, `hour`, `minutes` may be outside their usual ranges 
+and will be normalized during the conversion. For example, January 33 converts to February 2.
+This makes it very easy to add- or subtract days or months to an existing time.
+When the `seconds` or fraction of seconds `frac` add up over 60 those extra seconds are 
+interpreted as leap seconds.
+
+Due to timezone transitions, or leap seconds, it is possible to specify dates that never
+happened (as it was skipped by a timezone change), or ambigious times (as a timezone springs back).
+In such cases, the time is always interpreted in the earlier timezone.
+*/
 public fun time( year : int, month : int = 1, day : int = 1, 
                  hours : int = 0, minutes : int = 0, secs : int = 0, 
                  frac : double = 0.0, tz : timezone = tz-utc, cal : calendar = cal-iso ) : time 
@@ -234,7 +255,7 @@ public fun (-)( t1 : time, t2 : time ) : duration {
 // `t.copy(tz=tz-local())                               ` &quad; (change to a different time zone)
 public fun copy( t : time, 
                  year : int = t.year, month : int = t.month, day : int = t.day, 
-                 hours : int = t.hours, minutes : int = t.minutes, seconds : fixed = t.seconds, 
+                 hours : int = t.hours, minutes : int = t.minutes, seconds : ddouble = t.seconds, 
                  tz : timezone = t.timezone, cal : calendar = t.calendar ) : time 
 {
   time( Date(year,month,day), Clock(hours,minutes,seconds), tz, cal )
@@ -279,7 +300,7 @@ public fun start-of-year( t : time ) : time {
 
 // Return the weekday of a given time `t`.
 public fun weekday( t : time ) : weekday {
-  val days = t.mjd.floor
+  val days = t.mjd.floor.int
   val dow  = (days+3)%7        // plus 3 since MJD epoch was a wednesday  (note: 0 = sunday, 1 = monday, ..)
   dow.weekday                  // to ISO week day 
 }
@@ -287,10 +308,10 @@ public fun weekday( t : time ) : weekday {
 
 // Return a `:time` as a fractional year.\
 // `year-frac(time(2000,7,2)) == fixed(2000.5)`
-public fun year-frac( t : time ) : fixed {
-  val dfrac = t.mjd.fraction // t.clock.total-seconds.double / 86400.0
+public fun year-frac( t : time ) : ddouble {
+  val dfrac = t.mjd.fraction.double // t.clock.total-seconds.double / 86400.0
   val yfrac = ((t.day-of-year - 1).double + dfrac) / t.days-in-year.double
-  fixed(t.year,yfrac)
+  timespan(t.year,yfrac)
 }
 
 // Return the total months in the year of time `t`.
@@ -375,7 +396,7 @@ public fun days-in-year( t : time) : int {
 // `time(2015,12,31,12,0,0).mjd.show == "57387.5"` &quad; (exactly mid-day)\
 // `time(2016,12,31,12,0,0).mjd.show == "57753.499994213029942"` &quad; (this day has a leap second, so it is just before the real middle of the day)\
 // `time(2016,12,31,12,0,0,0.5).mjd.show == "57753.5"` &quad; (real middle of the day)\
-public fun mjd( t : time ) : fixed {
+public fun mjd( t : time ) : ddouble {
   //trace("offset: " + t.tzdelta.show)
   // adjust with the timezone delta so we display the mjd on the date.
   t.instant.mjd( t.calendar.timescale, t.tzdelta.timespan )
@@ -391,12 +412,12 @@ the timezone of `t` applied.\
 Takes leap seconds into account when calculating the fraction of the day,
 see `mjd` for examples.
 */
-public fun jd( t : time ) : fixed {
+public fun jd( t : time ) : ddouble {
   //trace("offset: " + t.tzdelta.show)
   // adjust with the timezone delta so we display the mjd on the date.
   t.mjd() + jd-epoch-delta
 }
-val jd-epoch-delta  = fixed(2400000.5) 
+val jd-epoch-delta  = timespan(2400000.5) 
 
 
 // Return the current time in an optional timezone (=`tz-utc`) and optional calendar (=`cal-iso`).

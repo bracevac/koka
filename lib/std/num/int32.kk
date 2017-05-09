@@ -9,9 +9,6 @@
 // Operations on 32-bit signed integers. 
 public module std/num/int32
 
-// Type of a 32-bit signed integer. 
-type int32
-
 // The maximal integer value before overflow happens
 val max-int32 : int = 0x7FFFFFFF
 
@@ -133,7 +130,7 @@ fun abs( i : int32 ) : exn int32
 {
   if (!i.neg?) then i
   elif (i > min-int32.int32) then negate(i)
-  else error( "system.core.abs: cannot make min-int32 int32o a positive int32 without overflow" )
+  else error( "std/num/int32/abs: cannot make min-int32 into a positive int32 without overflow" )
 }
 
 // Return the absolute value of an integer.

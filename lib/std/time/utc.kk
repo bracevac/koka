@@ -10,8 +10,8 @@
 
 # UTC time calculation 
 
-The world's civic time scale is Universal Coordinated Time (UTC)
-(`ts-utc`). UTC is directly based on International Atomic Time (TAI)
+The world's civic time scale is Universal Coordinated Time ([UTC]). 
+UTC is directly based on International Atomic Time ([TAI])
 (`ts-tai`) and uses standard SI seconds. The UTC time scale differs from
 TAI in that UTC stays within 1 second of [UT1](std_time_ut1.html); the
 time scale based on the rotation of the Earth. To keep UTC close to UT1
@@ -24,14 +24,14 @@ inserted on 2017-01-01Z, so:
 ```
 time(2017,1,1,0,0,0) - time(2016,12,31,23,0,0) 
 ```
-equals 3601 seconds to account for the extra leap second. We also need to
+equals 3601 SI seconds to account for the extra leap second. We also need to
 know the inserted leap seconds to convert UTC time to TAI which forms the
 basis of many other time scales (see [``std/time/astro``](std_time_astro.html)).
 
 The occurrence of leap seconds cannot be reliably predicted though and
 the IERS
 usually [announces](https://www.iers.org/SharedDocs/News/EN/BulletinC.html)
-leap seconds at most a year in advance. The [IETF leap second][ietfl]
+leap seconds about half a year in advance. The [IETF leap second][ietfl]
 table contains a list of all currently announced leap seconds. _As such,
 any future duration calculation in UTC is essentially non-deterministic since
 it may be off by a number of (as yet unannounced) leap seconds_. This means
@@ -48,24 +48,22 @@ in practice:
   monotonic and unambigious. If no interaction with the user is needed, 
   consider using TAI time and calendar instead.
 
-* When communicating with other services, you may consider using _smoothed UTC_ 
-  instead (`ts-utc-sls`) which hides any leap second by smoothing it out 
-  over the last 1000 seconds of a day.
 
+## Effect types and future leap seconds
 
-## Effect types
+Since UTC time calculations depend on a leap second table (`:leaps-table`),
+the UTC time scale can only be created from such table (`ts-utc-create`).
+For most precise UTC time, you can use [`ts-utc-load`](std_time_download.html#ts_utc_load)
+to automatically download and cache the latest IERS leap second information.
+This can be somewhat cumbersome though as this is a function with an `:io` effect.
 
-To give all time functions related to UTC a non-deterministic effect (or
-to give them all a leap second table argument) seems a bit too
-cumbersome. Instead we choose to ignore this form of non-determinism and
-make the leap second table a hidden global variable. The internal table
-is valid up to the release of the compiler.
-
-It is recommended to
-call [`update-leaps-table`](std_time_download.html#update_leaps_table) at
-the start of a program which will automatically ensure the leap second
-table is up-to-date (automatically downloading and caching the IETF leap
-second table as necessary).
+International Time ([TI]) (or _Temps International_) is a proposed time scale
+that matches exactly UTC up to some date but with no further leap seconds
+added  after that -- which makes time calculations robust and deterministic
+with regard to future dates. For this reason, this library defaults to using
+TI instead of UTC. The TI time scale (`ts-ti`) is defined
+to exactly match UTC before the compiler release date (currently 2017) but
+ignores any future leap seconds.
 
 
 ## UTC between 1961 and 1972
@@ -212,32 +210,37 @@ is calculated and uses historical data for time steps before 1972.
 
 ## References { - }
 
-~ Bibliography
+~ Bibliography { caption:"9" }
 
-~~ BibItem { #Arias:utc }
+~~ BibItem { #Arias:utc; searchterm:"Arias+Coordinated+universal+time+UTC+historical+background+perspectives" }
 E.F.\ Arias and B.\ Guinot.
 _Coordinated universal time UTC: historical background and perspectives_. 
 Journ&eacute;es Syst&egrave;mes de R&eacute;f&eacute;rence Spatio-Temporels. 2004.
-[pdf][astroa].
+[pdf][utchistory].
 ~~
 
-~~ BibItem { #Almanac }
+~~ BibItem { #Almanac; searchterm:"Explanatory+Supplement+to+the+Astronomical+Almanac" }
 P.K.\ Seidelmann.
 _Explanatory Supplement to the Astronomical Almanac_. 
-University Science Books, 1992.
+University Science Books, 1992. [pdf][astroa]
 ~~
 ~
 
 [ietfl]: https://www.ietf.org/timezones/data/leap-seconds.list
 [dat]: http://maia.usno.navy.mil/ser7/tai-utc.dat
 [astroa]: https://books.google.com/books?id=uJ4JhGJANb4C&lpg=PA87&vq=wwv&pg=PA87#v=onepage&q=wwv&f=false
+[utchistory]: https://syrte.obspm.fr/journees2004/pdf/Arias2.pdf
 [WWV]: https://www.nist.gov/time-and-frequency-services/nist-radio-stations/wwv
-
+[UTC]: std_time_astro.html
+[TAI]: std_time_astro.html
+[TI]: std_time_astro.html
+[TIpropose]: https://syrte.obspm.fr/journees2004/pdf/McCarthy2.pdf#page=4
+\/
 */
 module std/time/utc
 
 import std/text/regex
-import std/num/fixed
+import std/num/ddouble
 import std/time/timestamp
 import std/time/duration
 import std/time/instant
@@ -283,7 +286,7 @@ To indicate a time in a leap second, you can use a fraction `frac` that is large
 This works well for systems that support [``CLOCK_UTC``](http://www.madore.org/~david/computers/unix-leap-seconds.html).
 */
 public fun unix-instant( secs : double, frac : double = 0.0 ) : instant {
-  unsafe-instant( timestamp( fixed(secs.trunc.int, secs.fraction + frac.fraction), frac.trunc.int), ts-unix ) 
+  unsafe-instant( timestamp( timespan(secs.trunc.int, secs.fraction + frac.fraction), frac.trunc.int), ts-unix ) 
 }
 
 // Get a standard Unix timestamp in fractional seconds since the Unix epoch (1970-01-01Z).
@@ -299,36 +302,57 @@ public fun unix-timestamp( i :instant ) : double {
 // `y2k-epoch` (=`timestamp0`) which is the timestamp of the 2001-01-01 date in that timescale
 // e.g. for a timescale `ts`:\
 // `y2k-epoch = instant-at(2000,1,1,cal=iso-calender(ts)).timestamp(ts)`.
-public fun utc-timescale( name : string, y2k-epoch : timestamp = timestamp0 ) : timescale {
+public fun utc-timescale( name : string, leaps : leaps-table, y2k-epoch : timestamp = timestamp0 ) : timescale {
   val epoch-shift = y2k-epoch.timespan
-  fun from-tai(tai:duration) { tai-to-utc(tai) + epoch-shift }
-  fun to-tai(t:timestamp)    { utc-to-tai(t - epoch-shift) }
+  fun from-tai(tai:duration)  { tai-to-utc(leaps, tai) + epoch-shift }
+  fun to-tai(t:timestamp)     { utc-to-tai(leaps, t - epoch-shift) }
+  fun secs-in-day(t:timestamp){ utc-secs-in-day(leaps, t) }
   timescale(
     name,
     from-tai,
     to-tai,
     y2k-epoch,
     "UTC",
-    Just(utc-secs-in-day)
+    Just(secs-in-day)
   )
 }
 
 // The UTC time scale with a 2000-01-01Z UTC epoch. This uses [Unix seconds](https://en.wikipedia.org/wiki/Unix_time)
 // but in contrast to Unix time stamps the library will accurately maintain any leap second information
 // (through `:timestamp`s). 
-public val ts-utc : timescale = utc-timescale( "UTC" )
+public fun ts-utc-create( leaps : leaps-table ) : timescale {
+  utc-timescale( "UTC", leaps )
+}
 
 // [Unix](https://en.wikipedia.org/wiki/Unix_time) time scale based on Unix seconds but with 1970-01-01 epoch.
-public val ts-unix : timescale = utc-timescale( "UNIX", timestamp(946684800) )
+public fun ts-unix-create( leaps : leaps-table ) : timescale {
+  utc-timescale( "UNIX", leaps, timestamp(946684800) )
+}
 
 // [NTP](https://en.wikipedia.org/wiki/Network_Time_Protocol) time scale is equal to the UTC time scale (`ts-utc`) but 
 // with a 1900-01-01Z epoch.
-public val ts-ntp : timescale = utc-timescale( "NTP", timestamp(3155673600) )
+public fun ts-ntp-create( leaps : leaps-table ) : timescale {
+  utc-timescale( "NTP", leaps, timestamp(3155673600) )
+}
 
+/* The [TI] (_International Time_) time scale with a 2000-01-01Z UTC epoch. 
+This is the default time scale used in this library. It was a
+[proposed][TIpropose] time scale at the 2004 ITU-R meeting as a replacement of UTC
+without future leap seconds. In this library, we define TI to match
+exactly UTC up to the compiler release date (currently 2017) but ignore any
+possible future leap seconds after that date. This is the preferred time scale
+in this library as it guarantees deterministic time calculations for any
+future date, i.e. before 2017-01-01Z, TI == UTC, while after that, TI == TAI - 37s.
+*/
+public val ts-ti : timescale = utc-timescale( "TI", leaps-table-ti )
+
+// [Unix](https://en.wikipedia.org/wiki/Unix_time) time scale based on Unix seconds. 
+// It equals the `ts-ti` time scale except with a 1970-01-01 epoch.
+public val ts-unix : timescale = ts-unix-create( leaps-table-ti )
 
 
 // Standard seconds per day (=`86400`). Note that a UTC day can contain extra leap seconds.
-val secs-per-day = fixed(86400)
+val secs-per-day = timespan(86400)
 
 // -----------------------------------------------------------
 // UTC calendar leap second calculation
@@ -356,10 +380,10 @@ struct leap-adjust(
   utc-start  : utc-timestamp,  // start time in UTC seconds since 1972-01-01Z
   offset     : timespan,       // base offset
   delta-start: utc-timestamp  = timestamp0,   // start of delta adjustment
-  delta      : fixed = zero   
+  delta      : ddouble = zero   
 )
 
-val leap-table0 = Leaps-table(epoch,[])
+val leaps-table0 = Leaps-table(epoch,[])
 val zero : leap-adjust = Leap-adjust(timestamp0,timespan0,timestamp0,zero)
 
 fun zero?( la : leap-adjust ) : bool {
@@ -370,15 +394,28 @@ fun zero?( la : leap-adjust ) : bool {
 fun tai-offset( la : leap-adjust, utc-i : utc-timestamp ) : timespan {
   if (la.delta.zero?) then la.offset else {
     // pre 1972 is a rubber leap second
-    val days = ((utc-i.timespan - la.delta-start.timespan) / secs-per-day) // .floor.fixed
+    val days = div((utc-i.timespan - la.delta-start.timespan), secs-per-day, 3) 
     la.offset + (la.delta * days)
   }
 }
 
+
+// Default TI leaps table has leap second information up to the compiler release (currently `leaps-table-y2017`).
+public val leaps-table-ti : leaps-table = parse-leaps-table( default-ietf-leap-seconds ).default(leaps-table0)
+
+// Leap second table up to 2017-01-01Z.
+public val leaps-table-y2017 : leaps-table = leaps-table-ti.upto(536544000.timestamp)  // == instant(2017,1,1).timestamp(ts-ti)
+
+private fun upto( lt : leaps-table, end : timestamp ) : leaps-table {
+  lt( adjusts = lt.adjusts.drop-while(fun(la) { la.utc-start > end }),
+      expire  = unsafe-instant(end,ts-ti))
+}
+
+
 // Get a list of leap second steps in a triple, UTC time, offset just before, and the new offset at that time,
 // the base offset, the delta start date and the delta rate.
-public fun get-leap-steps( ) : io list<(timestamp,timespan,timespan,(timespan,timestamp,fixed))> {
-  val adjusts = unsafe-total(get-leaps-table).adjusts.reverse
+public fun get-leap-steps( table : leaps-table = leaps-table-ti ) : list<(timestamp,timespan,timespan,(timespan,timestamp,ddouble))> {
+  val adjusts = table.adjusts.reverse
   zip(Cons(zero,adjusts),adjusts).map( fun(las) {
     val ts = las.snd.utc-start
     val ofs1 = las.fst.tai-offset(ts)
@@ -387,40 +424,21 @@ public fun get-leap-steps( ) : io list<(timestamp,timespan,timespan,(timespan,ti
   })
 }
 
-// Set up a global leap second table.
-// We are going to pretend that this is total even though for future
-// dates utc-tai conversion might be off by some future leap seconds.
-val global-leaps-table : () -> ref<global,leaps-table> = once{
-  unsafe-total{ 
-    val pre72  = leap-seconds-pre72()
-    val post72 = parse-leaps-table( default-ietf-leap-seconds ).default(leap-table0)
-    // trace("parse leap tables: " + pre72.length.show)
-    ref(post72(adjusts = post72.adjusts + pre72))  // reverse order
-  }
-}
-
-// Get the global leap second table.
-public fun get-leaps-table() : st<global> leaps-table {
-  !(global-leaps-table()) 
-}
-
-
-// Update the leap second table from a leap seconds table.
-// Only performs the update if the provided table has a later expiry date.
-// The preferred way of updating the leap second table is through 
-// [`update-leaps-table`](std_time_download.html#update_leaps_table).
-public fun set-leaps-table( post72 : leaps-table ) : io () {
-  if (post72.expire > get-leaps-table().expire) then {
-    val r = global-leaps-table()
-    r := post72( adjusts = post72.adjusts + leap-seconds-pre72() )
-  }
-}
 
 /*----------------------------------------------------------------------------
   UTC-SLS: smoothed leap seconds
 ----------------------------------------------------------------------------*/
 
-// UTC with smoothed leap seconds.\
+// TI time scale with smoothed leap seconds.\
+// Implements a TI time scale (`ts-ti`) except without ever showing leap seconds.
+// TI-SLS is equivalent to TI except for the last 1000 seconds of a day where
+// a leap second occurs. On such day, the leap second time step (positive or negative)
+// is distributed over the last 1000 seconds of the day. On the full hour, TI
+// and TI-SLS are equal again. 
+public val ts-ti-sls : timescale = utc-sls-create( "TI-SLS", leaps-table-ti )
+
+
+// Create a new UTC-SLS time scale from a provided leap second table `leaps`.
 // Implements a UTC time scale except without ever showing leap seconds.
 // UTC-SLS is equivalent to UTC except for the last 1000 seconds of a day where
 // a leap second occurs. On such day, the leap second time step (positive or negative)
@@ -431,49 +449,53 @@ public fun set-leaps-table( post72 : leaps-table ) : io () {
 // time stamps or communication with other services since it avoids any potential trouble
 // with leap seconds while still being quite precise.
 // See also: <https://www.cl.cam.ac.uk/~mgk25/time/utc-sls>.
-public val ts-utc-sls : timescale = ts-utc-sls-create( "UTC-SLS", 1000.seconds )
+//
+// You can create a UTC-SLS time scale based on the latest IETF leap second
+// data using [`cal-utc-sls-load`](std_time_download.html#cal_utc_sls_load).
+public fun ts-utc-sls-create( leaps : leaps-table ) : timescale {
+  utc-sls-create( "UTC-SLS", leaps )
+}
 
 // Create a new smooted leap second time scale with an optional period during
 // which smoothing takes place. This is 1000s for `ts-utc-sls`.
-public fun ts-utc-sls-create( name : string, smooth-period : duration ) : timescale {
+fun utc-sls-create( name : string, leaps : leaps-table, smooth-period : duration = 1000.seconds ) : timescale {
   val sp = smooth-period.seconds
   timescale(
     name,
-    fun(tai:duration) { tai-to-utc-sls(tai,sp) },
-    fun(utc:timestamp) { utc-sls-to-tai(utc,sp) },
+    fun(tai:duration) { tai-to-utc-sls(leaps, tai, sp) },
+    fun(utc:timestamp) { utc-sls-to-tai(leaps, utc, sp) },
     timestamp0,
     "UTC-SLS",
     Nothing
   )
 }
 
-fun utc-sls-to-tai( t : timestamp, smooth-period : fixed ) : duration {
-  val (ofs,mbsmooth) = find-utc-smooth(t, smooth-period) 
+fun utc-sls-to-tai( leaps : leaps-table, t : timestamp, smooth-period : ddouble ) : duration {
+  val (ofs,mbsmooth) = find-utc-smooth(leaps, t, smooth-period) 
   // convert directly to tai as we have all info
   match(mbsmooth) { 
     Nothing -> {
       unsafe-duration( t + ofs )
     }
     Just((step,start)) -> {
-      unsafe-duration( ofs + start + (t.timespan - start) / (1.fixed - (step / smooth-period)) )
+      unsafe-duration( div( ofs + start + (t.timespan - start), (1.ddouble - div(step,smooth-period)) ) )
     }
   }
 }
 
-fun tai-to-utc-sls( tai :duration, smooth-period : fixed ) : timestamp {
-  val t = tai-to-utc(tai)
-  val tsls = match(find-utc-smooth(t, smooth-period).snd) {
+fun tai-to-utc-sls( leaps : leaps-table, tai :duration, smooth-period : ddouble ) : timestamp {
+  val t = tai-to-utc(leaps,tai)
+  val tsls = match(find-utc-smooth(leaps, t, smooth-period).snd) {
     Nothing -> t
-    Just((step,start)) -> t - step*((t.timespan - start) / smooth-period)
+    Just((step,start)) -> t - step*(div(t.timespan - start, smooth-period))
   }
   timestamp(tsls.seconds) // remove leap seconds
 }
 
 
-fun find-utc-smooth( t : timestamp, smooth-period : fixed ) : (timespan,maybe<(timespan,timespan)>) {
-  if (t < utc1958) then return (zero:fixed,Nothing)
+fun find-utc-smooth( leaps : leaps-table, t : timestamp, smooth-period : ddouble ) : (timespan,maybe<(timespan,timespan)>) {
+  if (t < utc1958) then return (zero:timespan,Nothing)
 
-  val leaps = unsafe-total(get-leaps-table)
   match(leaps.adjusts.find-adjust(t)) {
     Just((ladj,next)) -> {
       val ofs   = ladj.tai-offset(t)
@@ -481,7 +503,7 @@ fun find-utc-smooth( t : timestamp, smooth-period : fixed ) : (timespan,maybe<(t
       val start = next.utc-start + step - smooth-period
       (ofs, if (next.zero? || t < start) then Nothing else Just((step,start.timespan)))
     }
-    Nothing -> (zero:fixed,Nothing)
+    Nothing -> (zero:timespan,Nothing)
   } 
 }
 
@@ -497,23 +519,21 @@ fun find-adjust( leaps : list<leap-adjust>, t : timestamp, previous : leap-adjus
 }
 
 
+
 /*----------------------------------------------------------------------------
   UTC to TAI conversion
 ----------------------------------------------------------------------------*/
 
 // Convert a UTC duration since `epoch` to a TAI duration since `epoch`.
-fun utc-to-tai( t : timestamp ) : duration {
-  utc-to-tai-stamp( t ).unsafe-duration
+fun utc-to-tai( leaps : leaps-table, t : timestamp ) : duration {
+  utc-to-tai-stamp( leaps, t ).unsafe-duration
 }
 
-fun utc-to-tai-stamp( t : timestamp ) : timestamp {
-  val nlsecs = t //.without-leap-seconds
-  if (nlsecs < utc1958) then return t
-
-  val leaps = unsafe-total(get-leaps-table)
+fun utc-to-tai-stamp( leaps : leaps-table, t : timestamp ) : timestamp {
+  if (t < utc1958) then return t
   leaps.adjusts.find-maybe(fun(la) {
-    if (la.utc-start > nlsecs) then Nothing else {
-      val ofs = la.tai-offset(nlsecs)
+    if (la.utc-start > t) then Nothing else {
+      val ofs = la.tai-offset(t)
       // trace("found: " + t.show + " >= " + la.utc-start.show + ", ofs:" + ofs.show)
       Just( (t + ofs) )
     }
@@ -521,12 +541,9 @@ fun utc-to-tai-stamp( t : timestamp ) : timestamp {
 }
 
 // Convert a TAI duration since `epoch` to a UTC duration since `epoch`.
-fun tai-to-utc( d : duration ) : timestamp {
+fun tai-to-utc( leaps : leaps-table, d : duration ) : timestamp {
   //trace("utc-from-tai: " + i.show)
-  if (d < tai1958) then d.timestamp else {
-    val leaps = unsafe-total(get-leaps-table)
-    find-utc-from-tai( d.timestamp, leaps.adjusts )
-  }
+  if (d < tai1958) then d.timestamp else find-utc-from-tai( d.timestamp, leaps.adjusts )
 }
 val tai1958 = duration(~1325376000)  // 1958-01-01Z in seconds since epoch
 val utc1958 = tai1958.timestamp
@@ -560,7 +577,7 @@ fun find-utc-from-tai( i : timestamp, leaps : list<leap-adjust> ) : timestamp {
           else {
             // this is inside an added leap-second, use `add-leap-seconds`.
             val diff     = ofs - ofs-before
-            val utc-leap = utc-i.add-leap-seconds(diff)                            
+            val utc-leap = utc-i.adjust-leap-seconds(diff)                            
             // trace(" in a leap second: " + utc-leap.show + ", diff: " + diff.ts-show + ", ofs: " + ofs.ts-show + ", ofs-before: " + ofs-before.ts-show )
             utc-leap
           }
@@ -572,26 +589,24 @@ fun find-utc-from-tai( i : timestamp, leaps : list<leap-adjust> ) : timestamp {
 
 
 // Return the SI seconds in the day of time `t` (as a UTC timestamp)
-public fun utc-secs-in-day( t : timestamp ) : timespan {
-  val nlsecs = t.without-leap-seconds // TODO: check again
+public fun utc-secs-in-day( leaps : leaps-table, t : timestamp ) : timespan {
   //trace("search nlsecs: " + nlsecs.ts-show)
-  if (nlsecs < utc1972) then return secs-per-day
-  val leaps = unsafe-total(get-leaps-table)
-  match(leaps.adjusts.long-day?(nlsecs)) {
+  if (t < utc1972) then return secs-per-day
+  match(leaps.adjusts.long-day?(t)) {
     Just(leap-secs) -> leap-secs + secs-per-day
     _ -> secs-per-day
   }
 }
 val utc1972 = timestamp(~883612800)  // instant-at(1972).timestamp(ts-utc)
 
-fun long-day?( leaps : list<leap-adjust>, t : timestamp ) : maybe<fixed> {
+fun long-day?( leaps : list<leap-adjust>, t : timestamp ) : maybe<ddouble> {
   match(leaps) {
     Nil -> Nothing
     Cons(la,rest) -> {
       if (la.utc-start <= t) then return long-day?(rest,t) 
       if (la.utc-start - secs-per-day > t) then return Nothing  
       val delta = match(rest) {
-        Nil -> 1.fixed
+        Nil -> 1.timespan
         Cons(la-before) -> (la.offset - la-before.offset)
       }
       Just(delta)
@@ -605,30 +620,31 @@ fun long-day?( leaps : list<leap-adjust>, t : timestamp ) : maybe<fixed> {
 // Parsing UTC leap second tables
 // -----------------------------------------------------------
 
-val ntp-shift = 3155673600  // 2000-01-01 TAI - 1900-01-01 TAI in seconds
+val ntp-shift = 3155673600  // 2000-01-01 TAI - 1900-01-01 TAI in seconds; = (100*365 + 24)*(24*3600)  (24 leap days)
 
 
-// Parse a leap second table from text in the the [IETF leap second](https://www.ietf.org/timezones/data/leap-seconds.list) 
-// file format.
+// Parse a leap second table from text `leaps` in the  [IETF leap second](https://www.ietf.org/timezones/data/leap-seconds.list) 
+// file format. Returns a full leap second table extended with historical leap second adjustments from before 1972.
 public fun parse-leaps-table( leaps : string ) : maybe<leaps-table> {
   // get leap second adjustments
-  val las = leaps.find-all(rxleap).map fun(cap) {
+  val adjusts72 = leaps.find-all(rxleap).map fun(cap) {
     val ntpsecs = cap.groups[1].parse-int-default(ntp-shift)   
     val adjust  = cap.groups[2].parse-int-default(0)
     // trace("leap entry: " + adjust.show + " - " + ntpsecs.show )
-    Leap-adjust(timestamp(ntpsecs - ntp-shift), adjust.fixed, timestamp0)
+    Leap-adjust(timestamp(ntpsecs - ntp-shift), adjust.timespan, timestamp0)
   }.reverse
 
   // get expiration date
-  val la-final   = las.head.default(zero)
+  val la-final   = adjusts72.head.default(zero)
   val utc-expire = leaps.find(rxexpire).map fun(cap) {
     val ntpex = cap.groups[1].parse-int-default(ntp-shift)
     timestamp(ntpex - ntp-shift)
-  }.default(la-final.utc-start + (365.fixed*secs-per-day))
+  }.default(la-final.utc-start + (182.timespan*secs-per-day))  // default: 6 months after last leap second
   // trace("expire: " + utc-expire.ts-show)
   val expire = unsafe-instant( utc-expire + la-final.offset, ts-tai ) // interpret as TAI to avoid recursion..
 
-  val table = Leaps-table(expire,las)
+  val adjusts = adjusts72 + leap-seconds-pre72()  // add pre 1972 adjustments
+  val table = Leaps-table(expire,adjusts)
   Just(table)
 }
 val rxleap   = regex(@"^[ \t]*(\d+)[ \t]+(\d+)[ \t]*(?:#.*)?$",multiLine=True)
@@ -679,18 +695,18 @@ val default-ietf-leap-seconds = @"
 // Cached leap second table for dates before 1972.
 val leap-seconds-pre72 : (() -> list<leap-adjust>) = once{ parse-leap-seconds-dat() }
 
-val jd-epoch-shift     = 2400000.5.fixed
-val mjd-epoch-shift    = 4453401600.fixed // 2000-01-01 TAI - 1858-11-17 TAI modified julian date epoch
+val jd-epoch-shift     = 2400000.5.timespan
+val mjd-epoch-shift    = 4453401600.timespan // 2000-01-01 TAI - 1858-11-17 TAI modified julian date epoch
 
 
 // Parse the standard UTC leap second adjustment file.\
 // See <http://maia.usno.navy.mil/ser7/tai-utc.dat>
 fun parse-leap-seconds-dat( s : string = leap-seconds-dat ) : list<leap-adjust> {
   s.find-all(rxtaiadjust).map( fun(cap) {
-    val mjd    = cap.groups[1].parse-fixed.default(jd-epoch-shift) - jd-epoch-shift 
-    val ofs    = cap.groups[2].parse-fixed.default(zero)
-    val dmjd   = cap.groups[3].parse-fixed.default(zero)
-    val delta  = cap.groups[4].parse-fixed.default(zero)
+    val mjd    = cap.groups[1].parse-ddouble.default(jd-epoch-shift) - jd-epoch-shift 
+    val ofs    = cap.groups[2].parse-ddouble.default(zero)
+    val dmjd   = cap.groups[3].parse-ddouble.default(zero)
+    val delta  = cap.groups[4].parse-ddouble.default(zero)
     val start  = timestamp(mjd*secs-per-day - mjd-epoch-shift)  //instant(1858,11,17 + mjd.int)
     val dstart = timestamp(dmjd*secs-per-day - mjd-epoch-shift) //instant(1858,11,17 + dmjd.int)
     // trace("pre72 start=" + start.show + ", ofs: " + ofs.show + ", delta: " + delta.show )

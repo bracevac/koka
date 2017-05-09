@@ -8,18 +8,30 @@
 
 /* Instants in time.
 
-   Instants can be arbitrary far into the past
-   and future and are precise up to 10^-15^s (a femto-second). 
-   Internally, instants are represented in a certain time scale (`:timescale`) for
-   efficiency and precision. They automatically convert between different time scales 
-   when necessary (for example when comparing instants in time, or calculating durations
-   between UTC calendar times).
+Instants use `:ddouble` timestamps to represent a `:duration` since the `epoch`.
+This gives very high range and precision. It spans about 10^300^ years
+into the past and future, well beyond the expected life span of the universe.
+Any time can be expressed up to atto-second (10^-18^) precision up to 300,000 years 
+in the past and future, and can express up to pico-second (10^-12^) precision any time 
+since the age of the universe (about 13.8 billion years ago).
 
-   Time durations (`:duration`) are always in SI seconds (as measured on the Earth's geoid).
+```unchecked
+> instant(300000,1,1,0,0,0,1.0e-18).show(18) // 1 atto-second after Jan 1, 300000
+"9403971696037.000000000000000001s"
+> instant((~13.82e9).int,1,1,0,0,0,1.0e-12).show(12) // 1 pico-second after the birth of the universe
+"-436117139753903999.999999999999s" 
+```
+
+Internally, instants are represented in a certain time scale (`:timescale`) for
+efficiency and precision. They automatically convert between different time scales 
+when necessary (for example when comparing instants in time, or calculating durations
+between UTC calendar times).
+
+Time durations (`:duration`) are always in SI seconds (as measured on the Earth's geoid).
 */
 module std/time/instant
 
-import std/num/fixed
+import std/num/ddouble
 import std/time/timestamp
 import std/time/duration
 
@@ -27,12 +39,13 @@ import std/time/duration
   Instant
 ----------------------------------------------------------------------------*/
 
-// Represents an instant in time. Instants can be arbitrary far into the past
-// and future and are precise up to 10^-15^s (a femto-second). 
-// Internally, instants are represented in a certain time scale (`:timescale`) for
-// efficiency and precision. They automatically convert between different time scales 
-// when necessary (for example when comparing instants in time, or calculating durations
-// between UTC calendar times).
+/* Represents a precise instant in time.
+
+Internally, instants are represented in a certain time scale (`:timescale`) for
+efficiency and precision. They automatically convert between different time scales 
+when necessary (for example when comparing instants in time, or calculating durations
+between UTC calendar times).
+*/
 abstract struct instant(
   since : timestamp,  // since the time-scale epoch
   ts    : timescale   // the time scale (TAI, UTC, etc)
@@ -134,10 +147,17 @@ public fun timespan( i : instant, tscale : timescale = ts-tai ) : timespan {
 }
 
 // Create an instant from a time stamp `t` interpreted in time scale `ts`.\
-// Be careful to ensure that `t` should indeed be interepreted in the given time scale.
+// Be careful to ensure that `t` should indeed be interpreted in the given time scale.
 public fun unsafe-instant( t : timestamp, ts : timescale ) : instant {
   Instant(t,ts)
 }
+
+// Create an instant from a time span in `seconds` interpreted in time scale `ts`.\
+// Be careful to ensure that `secs` should indeed be interpreted in the given time scale.
+public fun unsafe-instant( secs : int, ts : timescale ) : instant {
+  unsafe-instant(secs.timestamp, ts)
+}
+
 
 // Round an instant to a certain precision (`prec` is number of digits of the fraction of the second).\
 // Takes special care for instants that use a UTC timescale to round into leap seconds if appropriate.
@@ -242,7 +262,7 @@ public fun show-raw( i : instant, max-prec : int = 9, secs-width : int = 1 ) : s
 // a `y2k-epoch` (= `timestamp0`) which is the timestamp of the 2000-01-01 date in that timescale
 // e.g. for a timescale `ts`:\
 // `y2k-epoch = instant(2000,1,1,cal=iso-calendar(ts)).timestamp(ts)`
-public fun tai-timescale( name : string, offset : duration = duration0, y2k-epoch : timestamp = timestamp0 ) : timescale {
+public fun tai-timescale( name : string, offset : duration = zero, y2k-epoch : timestamp = timestamp0 ) : timescale {
   val epoch-shift = y2k-epoch.timespan + offset.timespan
   fun from-tai(tai:duration) { tai.timestamp + epoch-shift }
   fun to-tai(ts:timestamp)   { (ts - epoch-shift).unsafe-duration }
@@ -312,18 +332,18 @@ public fun show( ts : timestamp, max-prec : int = 9, secs-width : int = 1 ) : st
 /*----------------------------------------------------------------------------
   Julian Date
 ----------------------------------------------------------------------------*/
-val jd-epoch-delta  = fixed(2400000.5)   // relative to the MJD epoch 
-val mjd-epoch-delta = fixed(51544)       // relative to our epoch (2000-01-01)
-val secs-per-day    = fixed(86400)
+val jd-epoch-delta  = timespan(2400000.5)   // relative to the MJD epoch 
+val mjd-epoch-delta = timespan(51544)       // relative to our epoch (2000-01-01)
+val secs-per-day    = timespan(86400)
 
 // Create an instant given a [julian day](https://en.wikipedia.org/wiki/Julian_day).
 public fun instant-at-jd( jd: double, ts : timescale ) : instant {
-  instant-at-jd(fixed(jd),ts)
+  instant-at-jd(ddouble(jd),ts)
 }
 
 // Create an instant given a [julian day](https://en.wikipedia.org/wiki/Julian_day)
 // and time scale `ts` (=`ts-utc`).
-public fun instant-at-jd( jd: fixed, ts : timescale  ) : instant {
+public fun instant-at-jd( jd: ddouble, ts : timescale  ) : instant {
   instant-at-mjd( jd - jd-epoch-delta, ts )
 }
 
@@ -331,25 +351,25 @@ public fun instant-at-jd( jd: fixed, ts : timescale  ) : instant {
 // and time scale `ts` (=`ts-utc`).\
 // `modified-julian-day = julian-day - 2400000.5`
 public fun instant-at-mjd( mjd : double, ts : timescale ) : instant {
-  instant-at-mjd(fixed(mjd),ts)
+  instant-at-mjd(ddouble(mjd),ts)
 }
 
 // Create an instant given a [modified julian day](https://en.wikipedia.org/wiki/Julian_day).
 // and time scale `ts` (=`ts-utc`).\
 // `modified-julian-day = julian-day - 2400000.5`
-public fun instant-at-mjd( mjd : fixed, tscale : timescale  ) : instant {
+public fun instant-at-mjd( mjd : ddouble, tscale : timescale  ) : instant {
   val d  = mjd - mjd-epoch-delta // since our epoch
   val ts = tscale.y2k-epoch + (d*secs-per-day) // since the time scale epoch
   val daysecs = ts.seconds-in-day(tscale)
   if (daysecs==secs-per-day) then return unsafe-instant(ts,tscale)
   // this is longer/shorter day due to leap seconds; adjust the fraction
-  val days = d.trunc.fixed
+  val days = d.trunc
   val sid  = (d - days)*daysecs  // seconds in the day
   val (nlsecs,lsecs) = if (sid >= secs-per-day)
                         then (secs-per-day.dec, sid.inc - secs-per-day)
-                        else (sid,zero)
+                        else (sid,zero:ddouble)
   val ts1  = tscale.y2k-epoch + (days*secs-per-day) + nlsecs
-  val ts2  = ts1.add-leap-seconds(lsecs)
+  val ts2  = ts1.adjust-leap-seconds(lsecs)
   unsafe-instant(ts2,tscale) 
 }
 
@@ -371,30 +391,32 @@ in a UTC calendar. For example:
 ````
 .
 */
-public fun jd( i : instant, ts : timescale ) : fixed {
+public fun jd( i : instant, ts : timescale ) : ddouble {
   i.mjd(ts) + jd-epoch-delta
 }
+
+val femto = 15 // femto-second precision
 
 // Return the modified julian day in a given time scale `ts` (=`ts-utc`) for an instant `i`.
 // Can also pass an optional `delta` (=`timespan0`) that is added to the raw timestamp of `i`
 // before conversion (used in `std/time/time` to take timezones into account)
-public fun mjd( i : instant, tscale : timescale, delta : timespan = timespan0 ) : fixed {
+public fun mjd( i : instant, tscale : timescale, delta : timespan = timespan0 ) : ddouble {
   val ts0     = i.timestamp(tscale)
   val daysecs = ts0.seconds-in-day(tscale) // total-seconds in the day of the timezone (before delta)
   val ts      = ts0 + delta
   if (daysecs==secs-per-day) then {
     // without leap seconds, just divide. 
-    ((ts.non-leap-seconds - tscale.y2k-epoch.timespan) / secs-per-day) + mjd-epoch-delta
+    div((ts.unadjusted-seconds - tscale.y2k-epoch.timespan), secs-per-day, femto) + mjd-epoch-delta
   }
   else {
     // otherwise, divide the non-leap-seconds first, but for the seconds in the day
     // divide by the longer day so the day fraction is correct.
     // trace("mjd: day seconds: " + daysecs.show)
-    val leaps = ts.leap-seconds
-    val secs  = (ts.non-leap-seconds - tscale.y2k-epoch.timespan)
-    val w     = (secs / secs-per-day).floor.fixed
+    val leaps = ts.leap-adjust
+    val secs  = (ts.unadjusted-seconds - tscale.y2k-epoch.timespan)
+    val w     = div(secs, secs-per-day, femto).floor
     val r     = secs - (w * secs-per-day)
-    val f     = (r + leaps.fixed) / daysecs
+    val f     = div(r + leaps.timespan, daysecs, femto+3) // see: test/lib/time3, jdleapx2  -- extra precision required on leap seconds
     (w + f + mjd-epoch-delta)
   }
 }

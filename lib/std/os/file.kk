@@ -12,7 +12,7 @@
 module std/os/file
 
 import std/os/path
-import std/num/fixed
+import std/num/ddouble
 import std/time/duration
 import std/time/instant
 import std/time/utc
@@ -38,48 +38,56 @@ public extern write-text-file-sync( fileName : string, content : string )  : io 
 
 
 // Set the access time and modification time of a file.
-public fun utimes( fname : path, atime : instant, mtime : instant ) : <async,file,exn> () {
-  unsafe-async-yield-err( fun(cb) { xfile-utimes( fname.string, atime.unix-timestamp*1000.0, mtime.unix-timestamp*1000.0, { cb(()) } ) } )
+public fun utimes( fname : path, atime : instant, mtime : instant ) : <asyncx,file> () {
+  await-exn0 fun(cb) { xfile-utimes( fname.string, atime.unix-timestamp*1000.0, mtime.unix-timestamp*1000.0, cb ) }
 }
 
-extern xfile-utimes( fname : string, atime : double, mtime : double, cb : () -> <async,file,exn> () ) : () {
+extern xfile-utimes( fname : string, atime : double, mtime : double, cb : (null<exception>) -> io () ) : io () {
   js "_file_utimes"  
 }
 
 // Return the modification time of a file.
-public fun mod-time( fname : path ) : <async,file,exn> instant {
-  unsafe-async-yield-err( fun(cb) { xfile-mod-time( fname.string, cb ) } ).unix-instant
+public fun mod-time( fname : path ) : <asyncx,file> instant {
+  await-exn1(fun(cb) { 
+    xfile-mod-time( fname.string, cb ) 
+  }).unix-instant
 }
 
-extern xfile-mod-time( fname : string, cb : (double) -> <async,file,exn> () ) : () {
+extern xfile-mod-time( fname : string, cb : (null<exception>,double) -> io () ) : io () {
   js "_file_mod_time" // (#1, function(stats){ return (#2)(stats.mtime.getTime() * 1e-3); })"  
 }
 
 
 // Write a text file (using UTF8 encoding) asynchronously
-public fun write-text( fname : path, text : string ) : <async,file,exn> () {
-  unsafe-async-yield-err( fun(cb) { xwrite-text(fname.string,text, { cb(()) }) } )
+public fun write-text( fname : path, text : string ) : <asyncx,file> () {
+  await-exn0 fun(cb) { 
+    xwrite-text(fname.string,text, cb) 
+  }
 }
 
-extern xwrite-text( fname : string, text : string, cb : () -> <async,file,exn> () ) : () {
+extern xwrite-text( fname : string, text : string, cb : (null<exception>) -> io () ) : io () {
   js "_file_write_text"
 }
 
 
 // Read a text file (using UTF8 encoding) asynchronously
-public fun read-text( fname : path ) : <async,file,exn> string {
-  unsafe-async-yield-err( fun(cb) { xread-text(fname.string,cb) } )
+public fun read-text( fname : path ) : <asyncx,file> string {
+  await-exn1 fun(cb) { 
+    xread-text(fname.string,cb) 
+  }
 }
 
-extern xread-text( fname : string, cb : string -> <async,file,exn> ()  ) : () {
+extern xread-text( fname : string, cb : (null<exception>,string) -> io ()  ) : io () {
   js "_file_read_text"
 }
 
 // Download a text file from `url`, timing out after `timeout` seconds (=`10.seconds`).
-public fun download-text( url : string, timeout : duration = duration(10) ) : <async,net,exn> string {
-  unsafe-async-yield-err( fun(cb) { xdownload-text(url,timeout.seconds.double*1000.0,cb) } )
+public fun download-text( url : string, timeout : duration = duration(10) ) : <asyncx,net> string {
+  await-exn1 fun(cb) { 
+    xdownload-text(url,timeout.seconds.double*1000.0,cb) 
+  }
 }
 
-extern xdownload-text( url : string, timeout : double, cb : string -> <async,net,exn> () ) : () {
+extern xdownload-text( url : string, timeout : double, cb : (null<exception>,string) -> io () ) : io () {
   js "_file_download_text"
 }

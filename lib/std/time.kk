@@ -12,8 +12,8 @@
 
 This is an extensive library for managing time and supports advanced features
 as multiple calendars, astronomical time scales, accurate leap seconds, and time zones.
-Times span arbitrary far in the past and future, and calculations are accurate
-up to femto-seconds (1&times;10^-15^s).
+Internally time is represented by a `:ddouble` giving it a very high range and precision 
+(see the `std/time/instant` module).
 
 Core concepts are:
 
@@ -23,7 +23,7 @@ Core concepts are:
 get the `:duration` between them. Instants are usually represented as the number
 of fractional SI seconds since the `epoch` (2000-01-01Z), but can be represented
 in different time scales for efficiency. For example, there is the TAI time scale (`ts-tai`),
-standard UTC (`ts-utc`), or astronimical time scales like terrestrial time ([``std/time/astro/ts-tt``](std_time_astro.html#ts_tt)).
+standard UTC (`ts-ti`), or astronomical time scales like terrestrial time (`std/time/astro/ts-tt`).
 
 * A `:time` is a human readable `:date` (year, month, day), and `:clock` (hour, minutes, seconds)
 in a particular `:calendar` (usually the standard ISO calendar) and time zone. 
@@ -100,16 +100,13 @@ other time irregularties:
 "1582-10-15T00:00:00Z JG"  // transition from Julian (`cal-julian`) to Gregorian (`cal-gregorian`) calendar)
 ```
 
-To calculate correctly with leap-seconds, it is recommended to call `update-leaps-table`
-at the start of a progrom which will ensure leap second information is up-to-date (automatically
-downloading and caching the latest IETF leap second table if required). See the [`std/time/utc`](std_time_utc.html)
-module for more information. 
+See the `std/time/utc` module for more information on leap seconds. 
 
 ## Time zones
 
 If calculating with timezones besides the UTC (`tz-utc`)
-and local timezone (`tz-local`), one needs to use the [`std/time/timezone`](std_time_timezone.html) 
-modules to load the latest time zone information ([`std/time/timezone/load-timezones`](std_time_timezone.html#load_timezones)).
+and local timezone (`tz-local`), one needs to use the `module std/time/timezone` 
+module to load the latest time zone information (`std/time/timezone/load-timezones`).
 
 ```
 import std/time
@@ -117,19 +114,23 @@ import std/time/timezone
 
 fun test-timezones() {
   val tzs = load-timezones()
-  val z1  = tzs.timezone("America/New_York")
-  val z2  = tzs.timezone("Asia/Tehran")
-  val t1  = instant(1978,12,30,12,1,0,tz=z1) + (14.hours + 44.minutes)
-  t1.time(tz=z2).show.println()  // 1978-12-31T11:45:00+04:00 (IRST)
-  val t2  = instant(1978,12,31,12,1,0,tz=z1) + (14.hours + 44.minutes) // across DST & leap second
-  t2.time(tz=z2).show.println   // 1979-01-01T11:14:59+03:30 (IRST)"
+  val tz1 = tzs.timezone("America/New_York")
+  val tz2 = tzs.timezone("Pacific/Kosrae")
+  
+  /* A flight of 12.5 hours from New York to Kosrae */
+  val t1  = instant(1997,12,31,12,1,0,tz=tz1) + (12.hours + 30.minutes) 
+  t1.time(tz=tz2).show.println   // "1998-01-01T17:31:00+12:00"
+  
+  /* Again, but across DST & leap second */
+  val t2  = instant(1998,12,31,12,1,0,tz=tz1) + (12.hours + 30.minutes) 
+  t2.time(tz=tz2).show.println   // "1999-01-01T16:30:59+11:00"
 }
 ```
 
 ## Intervals
 
 Using the `now` or `time-now` for measuring time intervals is not appropriate since these functions
-are not guaranteed to be monotonic or of sufficiently high precision. For timing, the [`std/time/timer`](std_time_timer.html) module
+are not guaranteed to be monotonic or of sufficiently high precision. For timing, the `module std/time/timer` module
 should be used with functions like `ticks` or `elapsed`:
 ```koka
 import std/time/timer
@@ -161,3 +162,5 @@ public import std/time/time
 public import std/time/locale
 public import std/time/format
 public import std/time/parse
+
+import std/num/ddouble  // for documentation

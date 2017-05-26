@@ -761,7 +761,8 @@ inferHandler propagated expect shallow mbeff pars ret ops hrng rng
        -- infer the handled effect
        mbhxeff <- inferHandledEffect hrng mbeff ops
 
-       let branchTp = if (shallow) then retInTp else retOutTp
+       --let branchTp = if (shallow) then retInTp else retOutTp
+       let branchTp = retOutTp
 
        (handlerTp,opsfunCore,makeHTp,hxName,mkHandlerName) 
           <- case mbhxeff of
@@ -844,7 +845,7 @@ inferHandlerOps shallow hxeff parBinders argPars retInTp retEff branchTp retTp o
            lPars     = [(binderName b, binderType b) | b <- lBinders]
            -- resume
            resumeTp = TFun (lPars ++ contPar ++ argPars ++ [(newName "x",opsResTp)]) 
-                            resumeEff branchTp 
+                            resumeEff (if shallow then retInTp else branchTp)
            resumeBinder = ValueBinder (newHiddenName "resume") resumeTp () hrng hrng           
            -- gammas
            opsgamma = inferBinders [] (lBinders ++ [contBinder,opsBinder,resumeBinder])
